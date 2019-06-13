@@ -80,14 +80,6 @@ type BinaryDataPacket struct {
 	Value   interface{}
 }
 
-// pckt := EncodeRequestPacket(1, ARS31_ARS31PRO_UMB, []uint16{151})
-// fmt.Printf("% X\n", pckt.message)
-// pckt, err = pckt.DecodeResponsePacket([]byte{0x01, 0x10, 0x01, 0xF0, 0x01, 0x40, 0x0A, 0x02, 0x23, 0x10, 0x00, 0x97, 0x00, 0x16, 0x66, 0x66, 0x96, 0xC1, 0x03, 0xFF, 0xEA, 0x04})
-// if err != nil {
-// 	fmt.Println(err.Error())
-// }
-// fmt.Printf("% X\n", pckt)
-
 func ChangeProtocolASCIIToBinaryPacket(id, class uint16) []byte {
 	var tempTo uint16 = (class) << 12
 	tempTo = tempTo | (0x0FFF & id)
