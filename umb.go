@@ -91,7 +91,7 @@ func BinaryOnlineDataRequest(id, class uint16, channel []uint16) (message [][]by
 		return
 	}
 
-	channelLimit := 40
+	channelLimit := 100
 
 	if channelLen > channelLimit {
 		messageCount := channelLen / channelLimit
