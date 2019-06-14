@@ -1,7 +1,6 @@
 package umb
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -71,13 +70,10 @@ type BinaryOnlineDataPacket struct {
 }
 
 type BinaryDataPacket struct {
-	Len     byte
-	Status  byte
 	Channel uint16
-	Payload []byte
 	Typ     byte
-	Val     []byte
 	Value   interface{}
+	Err     error
 }
 
 func ChangeProtocolASCIIToBinaryPacket(id, class uint16) []byte {
@@ -87,247 +83,203 @@ func ChangeProtocolASCIIToBinaryPacket(id, class uint16) []byte {
 
 }
 
-func NewBinaryPacket() *BinaryOnlineDataPacket {
-	return &BinaryOnlineDataPacket{}
-}
+func BinaryOnlineDataRequest(id, class uint16, channel []uint16) (message [][]byte) {
 
-func (pckt *BinaryOnlineDataPacket) Pack(id, class uint16, channel []uint16) {
+	channelLen := len(channel)
 
-	if len(channel) == 0 {
+	if channelLen == 0 {
 		return
 	}
 
-	pckt.Id = id
-	pckt.Class = class
+	channelLimit := 40
 
-	var tempTo uint16 = (class) << 12
-	tempTo = tempTo | (0x0FFF & id)
-
-	pckt.SOH = START_FRAME
-	pckt.Ver = HEADER_VERSION
-	pckt.To = make([]byte, 2)
-	pckt.From = make([]byte, 2)
-	pckt.Len = 2 + byte(len(channel)*2)
-	pckt.STX = START_TRANSMISSION
-	if len(channel) > 1 {
-		pckt.Len++
-		pckt.Cmd = MULTI_ONLINE_DATA_REQUEST_CMD
-		pckt.Verc = MULTI_ONLINE_DATA_REQUEST_CMD_VERC
-	} else {
-		pckt.Cmd = ONLINE_DATA_REQUEST_CMD
-		pckt.Verc = ONLINE_DATA_REQUEST_CMD_VERC
-	}
-	pckt.Packet = make([]BinaryDataPacket, len(channel))
-	pckt.ETX = END_TRANSMISSION
-	pckt.Cs = make([]byte, 2)
-	pckt.EOT = END_FRAME
-
-	binary.LittleEndian.PutUint16(pckt.To, tempTo)
-	binary.LittleEndian.PutUint16(pckt.From, FROM_ID)
-	for i := 0; i < len(channel); i++ {
-		pckt.Packet[i].Payload = make([]byte, 2)
-		binary.LittleEndian.PutUint16(pckt.Packet[i].Payload, channel[i])
+	if channelLen > channelLimit {
+		messageCount := channelLen / channelLimit
+		for i := 0; i < messageCount; i++ {
+			if msg := BinaryOnlineDataRequest(id, class, channel[i*channelLimit:(i+1)*channelLimit]); msg != nil && len(msg) > 0 {
+				message = append(message, msg[0])
+			}
+		}
+		if msg := BinaryOnlineDataRequest(id, class, channel[(channelLen/channelLimit)*channelLimit:channelLen]); msg != nil && len(msg) > 0 {
+			message = append(message, msg[0])
+		}
+		return
 	}
 
-	pckt.Message = append(pckt.Message, pckt.SOH)
-	pckt.Message = append(pckt.Message, pckt.Ver)
-	pckt.Message = append(pckt.Message, pckt.To[0])
-	pckt.Message = append(pckt.Message, pckt.To[1])
-	pckt.Message = append(pckt.Message, pckt.From[0])
-	pckt.Message = append(pckt.Message, pckt.From[1])
-	pckt.Message = append(pckt.Message, pckt.Len)
-	pckt.Message = append(pckt.Message, pckt.STX)
-	pckt.Message = append(pckt.Message, pckt.Cmd)
-	pckt.Message = append(pckt.Message, pckt.Verc)
-	if len(pckt.Packet) > 1 {
-		pckt.Message = append(pckt.Message, byte(len(pckt.Packet)))
-	}
-	for i := 0; i < len(pckt.Packet); i++ {
-		pckt.Message = append(pckt.Message, pckt.Packet[i].Payload[0])
-		pckt.Message = append(pckt.Message, pckt.Packet[i].Payload[1])
-	}
-	pckt.Message = append(pckt.Message, pckt.ETX)
-	binary.LittleEndian.PutUint16(pckt.Cs, CalcCRC(pckt.Message))
-	pckt.Message = append(pckt.Message, pckt.Cs[0])
-	pckt.Message = append(pckt.Message, pckt.Cs[1])
-	pckt.Message = append(pckt.Message, pckt.EOT)
+	class = (class) << 12
+	class = class | (0x0FFF & id)
+	tempTo := make([]byte, 2)
+	binary.LittleEndian.PutUint16(tempTo, class)
+	tempFrom := make([]byte, 2)
+	binary.LittleEndian.PutUint16(tempFrom, FROM_ID)
 
+	message = append(message, []byte{})
+
+	message[0] = append(message[0], START_FRAME)
+	message[0] = append(message[0], HEADER_VERSION)
+	message[0] = append(message[0], tempTo[0])
+	message[0] = append(message[0], tempTo[1])
+	message[0] = append(message[0], tempFrom[0])
+	message[0] = append(message[0], tempFrom[1])
+	message[0] = append(message[0], byte(channelLen*2+3))
+	message[0] = append(message[0], START_TRANSMISSION)
+	message[0] = append(message[0], MULTI_ONLINE_DATA_REQUEST_CMD)
+	message[0] = append(message[0], MULTI_ONLINE_DATA_REQUEST_CMD_VERC)
+	message[0] = append(message[0], byte(channelLen))
+	for i := 0; i < channelLen; i++ {
+		tempChannel := make([]byte, 2)
+		binary.LittleEndian.PutUint16(tempChannel, channel[i])
+		message[0] = append(message[0], tempChannel[0])
+		message[0] = append(message[0], tempChannel[1])
+	}
+	message[0] = append(message[0], END_TRANSMISSION)
+	tempCrc := make([]byte, 2)
+	binary.LittleEndian.PutUint16(tempCrc, CalcCRC(message[0]))
+	message[0] = append(message[0], tempCrc[0])
+	message[0] = append(message[0], tempCrc[1])
+	message[0] = append(message[0], END_FRAME)
+
+	return
 }
 
-func (p *BinaryOnlineDataPacket) Unpack(byt []byte) (pckt *BinaryOnlineDataPacket, generalError error, err []error) {
+func BinaryOnlineDataResponse(byt []byte) (id, class uint16, pckt []BinaryDataPacket, err error) {
 
 	bytLen := len(byt)
 
 	if bytLen < 2 {
-		generalError = errors.New("This packet is empty.")
+		err = errors.New("This packet is empty.")
 		return
 	}
 
 	if byt[0] != START_FRAME || byt[bytLen-1] != END_FRAME {
-		generalError = errors.New("The packet cannot be resolved.")
+		err = errors.New("The packet cannot be resolved.")
 		return
 	}
 
 	if bytLen != int(byt[6])+12 {
-		generalError = errors.New("Wrong length.")
+		err = errors.New("Wrong length.")
 		return
 	}
 
 	if CalcCRC(byt[:bytLen-3]) != binary.LittleEndian.Uint16(byt[bytLen-3:bytLen-1]) {
-		generalError = errors.New("Wrong CRC.")
-		return
-	}
-
-	if !bytes.Equal(p.To, byt[4:6]) || !bytes.Equal(p.From, byt[2:4]) {
-		generalError = errors.New("ID or From error.")
-		return
-	}
-
-	if p.Cmd != byt[8] {
-		generalError = errors.New("Wrong Command.")
+		err = errors.New("Wrong CRC.")
 		return
 	}
 
 	if byt[10] != 0 {
 		if int(byt[10]) > len(statusInfo) {
-			generalError = errors.New("Status error :" + fmt.Sprint(byt[10]))
+			err = errors.New("Status error :" + fmt.Sprint(byt[10]))
 			return
 		}
-		generalError = errors.New(statusInfo[byt[10]])
+		err = errors.New(statusInfo[byt[10]])
 		return
 	}
 
-	pckt = &BinaryOnlineDataPacket{
-		SOH:     byt[0],
-		Ver:     byt[1],
-		To:      byt[2:4],
-		From:    byt[4:6],
-		Len:     byt[6],
-		STX:     byt[7],
-		Cmd:     byt[8],
-		Verc:    byt[9],
-		Status:  byt[10],
-		Packet:  make([]BinaryDataPacket, len(p.Packet)),
-		ETX:     byt[bytLen-4],
-		Cs:      byt[bytLen-3 : bytLen-1],
-		EOT:     END_FRAME,
-		Id:      binary.LittleEndian.Uint16(byt[4:6]) & 0x0FFF,
-		Class:   binary.LittleEndian.Uint16(byt[4:6]) >> 12,
-		Message: byt,
+	if byt[8] == ONLINE_DATA_REQUEST_CMD && byt[9] == ONLINE_DATA_REQUEST_CMD_VERC {
+		pckt = append(pckt, BinaryDataPacket{})
+		if 14 > bytLen {
+			pckt[0].Err = errors.New("Wrong length.")
+		}
+		pckt[0].Channel = binary.LittleEndian.Uint16(byt[11:13])
+		pckt[0].Typ = byt[13]
+		pckt[0].Value, pckt[0].Err = detectTypeConvert(byt[13], byt[14:bytLen-4])
+		return
 	}
 
-	err = make([]error, len(pckt.Packet))
+	if byt[8] == MULTI_ONLINE_DATA_REQUEST_CMD && byt[9] == MULTI_ONLINE_DATA_REQUEST_CMD_VERC {
 
-	if len(pckt.Packet) > 1 {
-
-		if len(pckt.Packet) != int(byt[11]) {
-			generalError = errors.New("Wrong Channel Count.")
-			return
-		}
+		id = binary.LittleEndian.Uint16(byt[4:6]) & 0x0FFF
+		class = binary.LittleEndian.Uint16(byt[4:6]) >> 12
 
 		next := 12
+		for channelCount := 0; next < bytLen-5; channelCount++ {
+			fmt.Println(next, bytLen)
 
-		for i := 0; i < len(pckt.Packet); i++ {
-			if i != 0 {
-				next += int(byt[next]) + 1
-			}
+			pckt = append(pckt, BinaryDataPacket{})
 
-			if 12+int(byt[next]) > bytLen {
-				err[i] = errors.New("Wrong length.")
-				return
-			}
-
-			pckt.Packet[i].Len = byt[next]
-
-			pckt.Packet[i].Status = byt[next+1]
-			if pckt.Packet[i].Status != 0 {
-				if int(pckt.Packet[i].Status) > len(statusInfo) {
-					err[i] = errors.New("Status error :" + fmt.Sprint(pckt.Packet[i].Status))
+			if byt[next+1] != 0 {
+				if int(byt[next+1]) > len(statusInfo) {
+					pckt[channelCount].Err = errors.New("Status error :" + fmt.Sprint(byt[next+1]))
+					next += int(byt[next]) + 1
 					continue
 				}
-				generalError = errors.New(statusInfo[byt[next+1]])
+				fmt.Println(byt[next+1])
+				pckt[channelCount].Err = errors.New(statusInfo[byt[next+1]])
+				next += int(byt[next]) + 1
 				continue
 			}
 
-			pckt.Packet[i].Payload = byt[next+2 : next+4]
-			pckt.Packet[i].Channel = binary.LittleEndian.Uint16(pckt.Packet[i].Payload)
-			if p.Packet[i].Payload[0] != pckt.Packet[i].Payload[0] || p.Packet[i].Payload[1] != pckt.Packet[i].Payload[1] {
-				err[i] = errors.New("Wrong Channel.")
-				continue
+			pckt[channelCount].Channel = binary.LittleEndian.Uint16(byt[next+2 : next+4])
+			pckt[channelCount].Typ = byt[next+4]
+			pckt[channelCount].Value, pckt[channelCount].Err = detectTypeConvert(byt[next+4], byt[next+5:next+int(byt[next])+1])
+
+			if byt[next] == 0 {
+				break
 			}
-
-			pckt.Packet[i].Typ = byt[next+4]
-			pckt.Packet[i].Val = byt[next+5 : next+int(byt[next])+1]
+			next += int(byt[next]) + 1
 		}
 
-	} else if len(p.Packet) == 1 {
-		if 14 > bytLen {
-			err[0] = errors.New("Wrong length.")
-		}
-		pckt.Packet[0].Len = pckt.Len
-		pckt.Packet[0].Status = pckt.Status
-		pckt.Packet[0].Payload = byt[11:13]
-		pckt.Packet[0].Channel = binary.LittleEndian.Uint16(pckt.Packet[0].Payload)
-		pckt.Packet[0].Typ = byt[13]
-		pckt.Packet[0].Val = byt[14 : bytLen-4]
+		return
 	}
 
-	for i := 0; i < len(pckt.Packet); i++ {
+	err = errors.New("Unknown command or version")
+	return
 
-		switch pckt.Packet[i].Typ {
-		case UNSIGNED_CHAR:
-			if len(pckt.Packet[i].Val) != 1 {
-				pckt.Packet[i].Value = uint8(0)
-			} else {
-				pckt.Packet[i].Value = uint8(pckt.Packet[i].Val[0])
-			}
-		case SIGNED_CHAR:
-			if len(pckt.Packet[i].Val) != 1 {
-				pckt.Packet[i].Value = int8(0)
-			} else {
-				pckt.Packet[i].Value = int8(pckt.Packet[i].Val[0])
-			}
-		case UNSIGNED_SHORT:
-			if len(pckt.Packet[i].Val) != 2 {
-				pckt.Packet[i].Value = uint16(0)
-			} else {
-				pckt.Packet[i].Value = binary.LittleEndian.Uint16(pckt.Packet[i].Val)
-			}
-		case SIGNED_SHORT:
-			if len(pckt.Packet[i].Val) != 2 {
-				pckt.Packet[i].Value = int16(0)
-			} else {
-				pckt.Packet[i].Value = int16(binary.LittleEndian.Uint16(pckt.Packet[i].Val))
-			}
-		case UNSIGNED_LONG:
-			if len(pckt.Packet[i].Val) != 4 {
-				pckt.Packet[i].Value = uint32(0)
-			} else {
-				pckt.Packet[i].Value = binary.LittleEndian.Uint32(pckt.Packet[i].Val)
-			}
-		case SIGNED_LONG:
-			if len(pckt.Packet[i].Val) != 4 {
-				pckt.Packet[i].Value = int32(0)
-			} else {
-				pckt.Packet[i].Value = int32(binary.LittleEndian.Uint32(pckt.Packet[i].Val))
-			}
-		case FLOAT:
-			if len(pckt.Packet[i].Val) != 4 {
-				pckt.Packet[i].Value = float32(0)
-			} else {
-				pckt.Packet[i].Value = math.Float32frombits(binary.LittleEndian.Uint32(pckt.Packet[i].Val))
-			}
-		case DOUBLE:
-			if len(pckt.Packet[i].Val) != 8 {
+}
 
-				pckt.Packet[i].Value = float64(0)
-			} else {
-				pckt.Packet[i].Value = math.Float64frombits(binary.LittleEndian.Uint64(pckt.Packet[i].Val))
-			}
-		default:
-			err[i] = errors.New("Non type declared.")
-			pckt.Packet[i].Value = 0
+func detectTypeConvert(typ byte, val []byte) (value interface{}, err error) {
+	switch typ {
+	case UNSIGNED_CHAR:
+		if len(val) != 1 {
+			value = uint8(0)
+		} else {
+			value = uint8(val[0])
 		}
+	case SIGNED_CHAR:
+		if len(val) != 1 {
+			value = int8(0)
+		} else {
+			value = int8(val[0])
+		}
+	case UNSIGNED_SHORT:
+		if len(val) != 2 {
+			value = uint16(0)
+		} else {
+			value = binary.LittleEndian.Uint16(val)
+		}
+	case SIGNED_SHORT:
+		if len(val) != 2 {
+			value = int16(0)
+		} else {
+			value = int16(binary.LittleEndian.Uint16(val))
+		}
+	case UNSIGNED_LONG:
+		if len(val) != 4 {
+			value = uint32(0)
+		} else {
+			value = binary.LittleEndian.Uint32(val)
+		}
+	case SIGNED_LONG:
+		if len(val) != 4 {
+			value = int32(0)
+		} else {
+			value = int32(binary.LittleEndian.Uint32(val))
+		}
+	case FLOAT:
+		if len(val) != 4 {
+			value = float32(0)
+		} else {
+			value = math.Float32frombits(binary.LittleEndian.Uint32(val))
+		}
+	case DOUBLE:
+		if len(val) != 8 {
+			value = float64(0)
+		} else {
+			value = math.Float64frombits(binary.LittleEndian.Uint64(val))
+		}
+	default:
+		err = errors.New("Non type declared.")
+		value = 0
 	}
 
 	return
