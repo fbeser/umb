@@ -71,6 +71,7 @@ type BinaryOnlineDataPacket struct {
 
 type BinaryDataPacket struct {
 	Channel uint16
+	Unit    String
 	Typ     byte
 	Value   interface{}
 	Err     error
