@@ -8,6 +8,10 @@ import (
 )
 
 const (
+	CHANNEL_LIMIT = 20
+)
+
+const (
 	START_FRAME                        = 0X01
 	HEADER_VERSION                     = 0X10
 	FROM_ID                            = 0xF001
@@ -70,8 +74,9 @@ type BinaryOnlineDataPacket struct {
 }
 
 type BinaryDataPacket struct {
+	Name    string
 	Channel uint16
-	Unit    String
+	Unit    string
 	Typ     byte
 	Value   interface{}
 	Err     error
@@ -92,16 +97,14 @@ func BinaryOnlineDataRequest(id, class uint16, channel []uint16) (message [][]by
 		return
 	}
 
-	channelLimit := 100
-
-	if channelLen > channelLimit {
-		messageCount := channelLen / channelLimit
+	if channelLen > CHANNEL_LIMIT {
+		messageCount := channelLen / CHANNEL_LIMIT
 		for i := 0; i < messageCount; i++ {
-			if msg := BinaryOnlineDataRequest(id, class, channel[i*channelLimit:(i+1)*channelLimit]); msg != nil && len(msg) > 0 {
+			if msg := BinaryOnlineDataRequest(id, class, channel[i*CHANNEL_LIMIT:(i+1)*CHANNEL_LIMIT]); msg != nil && len(msg) > 0 {
 				message = append(message, msg[0])
 			}
 		}
-		if msg := BinaryOnlineDataRequest(id, class, channel[(channelLen/channelLimit)*channelLimit:channelLen]); msg != nil && len(msg) > 0 {
+		if msg := BinaryOnlineDataRequest(id, class, channel[(channelLen/CHANNEL_LIMIT)*CHANNEL_LIMIT:channelLen]); msg != nil && len(msg) > 0 {
 			message = append(message, msg[0])
 		}
 		return
@@ -194,7 +197,6 @@ func BinaryOnlineDataResponse(byt []byte) (id, class uint16, pckt []BinaryDataPa
 
 		next := 12
 		for channelCount := 0; next < bytLen-5; channelCount++ {
-			fmt.Println(next, bytLen)
 
 			pckt = append(pckt, BinaryDataPacket{})
 
@@ -204,7 +206,6 @@ func BinaryOnlineDataResponse(byt []byte) (id, class uint16, pckt []BinaryDataPa
 					next += int(byt[next]) + 1
 					continue
 				}
-				fmt.Println(byt[next+1])
 				pckt[channelCount].Err = errors.New(statusInfo[byt[next+1]])
 				next += int(byt[next]) + 1
 				continue
